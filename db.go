@@ -47,12 +47,12 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrKeyIsEmpty
 	}
 	logRecordPos := db.index.Get(key)
-	fileID := logRecordPos.Fid
-	offset := logRecordPos.Offset
 	// key不存在
 	if logRecordPos == nil {
 		return nil, ErrKeyNotFound
 	}
+	fileID := logRecordPos.Fid
+	offset := logRecordPos.Offset
 	var dataFile *data.DataFile
 	if db.activeFile.FileID == fileID {
 		dataFile = db.activeFile

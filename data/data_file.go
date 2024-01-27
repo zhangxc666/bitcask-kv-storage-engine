@@ -2,7 +2,7 @@ package data
 
 import "tiny-kvDB/fio"
 
-// 数据文件
+// DataFile 数据文件
 type DataFile struct {
 	FileID    uint32        //文件ID
 	WriteOff  int64         // 文件写入的位置
