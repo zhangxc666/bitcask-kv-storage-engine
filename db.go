@@ -1,6 +1,11 @@
 package tiny_kvDB
 
 import (
+	"io"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"tiny-kvDB/data"
 	"tiny-kvDB/index"
@@ -9,9 +14,93 @@ import (
 type DB struct {
 	options    Options
 	mu         *sync.Mutex
+	fileIDs    []int                     // 文件ID列表，仅用于加载索引的使用，不能在其他地方更新和使用
 	activeFile *data.DataFile            // 当前活跃文件，用于写入
 	olderFile  map[uint32]*data.DataFile // 旧的数据文件，仅用于读
 	index      index.Indexer             // 内存索引
+}
+
+// Open 打开kv存储引擎
+func Open(option Options) (*DB, error) {
+	if err := checkOptions(option); err != nil {
+		return nil, err
+	}
+
+	// 判断目录是否存在，如果不存在的话就创建这个目录
+	if _, err := os.Stat(option.DirPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(option.DirPath, os.ModePerm); err != nil {
+			return nil, err
+		}
+	}
+
+	db := &DB{
+		options:   option,
+		mu:        new(sync.Mutex),
+		olderFile: make(map[uint32]*data.DataFile),
+		index:     index.NewIndexer(option.IndexType),
+	}
+
+	// 加载数据文件
+	if err := db.loadDataFiles(); err != nil {
+		return nil, err
+	}
+
+	// 加载数据索引
+
+	if err := db.loadIndexerFromDataFile(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// 从磁盘中加载数据文件
+func (db *DB) loadDataFiles() error {
+	// 找到对应文件夹下的所有文件
+	dirEntries, err := os.ReadDir(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	var fileIDs []int
+	// 遍历目录中的所有文件，找到所有以.data结尾的文件
+	for _, entry := range dirEntries {
+		if strings.HasSuffix(entry.Name(), data.DataFileNameSuffix) {
+			str := strings.Split(entry.Name(), ".")
+			fileID, err := strconv.Atoi(str[0])
+			if err != nil {
+				return ErrDataDirectoryCorrupted
+			}
+			fileIDs = append(fileIDs, fileID)
+		}
+	}
+
+	// 对文件ID排序，从小到大依次加载数据文件
+	sort.Ints(fileIDs)
+	db.fileIDs = fileIDs
+	for i, fileID := range fileIDs {
+		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fileID))
+		if err != nil {
+			return err
+		}
+		if i == len(fileIDs)-1 { // 活跃文件
+			db.activeFile = dataFile
+		} else { // 老的文件
+			db.olderFile[uint32(fileID)] = dataFile
+		}
+
+	}
+
+	return nil
+}
+
+func checkOptions(option Options) error {
+	if option.DirPath == "" {
+		return ErrDatabaseDirIsEmpty
+	}
+	if option.DataFileSize <= 0 {
+		return ErrDataSizeIsInvalid
+	}
+	return nil
 }
 
 // Put DB写入Key、Value
@@ -64,7 +153,7 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrDataFileNotFound
 	}
 	// 读取对应的文件
-	logRecord, err := dataFile.ReadLogRecord(offset)
+	logRecord, _, err := dataFile.ReadLogRecord(offset)
 	if err != nil {
 		return nil, err
 	}
@@ -129,5 +218,51 @@ func (db *DB) setActiveDataFile() error {
 		return err
 	}
 	db.activeFile = dataFile
+	return nil
+}
+
+// 加载数据索引
+func (db *DB) loadIndexerFromDataFile() error {
+	if len(db.fileIDs) == 0 {
+		return nil
+	}
+	// 遍历所有的dataFile
+	for i, fid := range db.fileIDs {
+		fileID := uint32(fid)
+		var dataFile *data.DataFile
+		if fileID == db.activeFile.FileID {
+			dataFile = db.activeFile
+		} else {
+			dataFile = db.olderFile[fileID]
+		}
+
+		// 通过索引从头开始遍历
+		var offset int64 = 0
+		for {
+			logRecord, size, err := dataFile.ReadLogRecord(offset)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+			//构建内存索引并保存
+			logRecordPos := &data.LogRecordPos{Fid: fileID, Offset: offset}
+
+			// 如果当前的记录是被删除的
+			if logRecord.Type == data.LogRecordDeleted {
+				db.index.Delete(logRecord.Key)
+			} else {
+				db.index.Put(logRecord.Key, logRecordPos)
+			}
+
+			offset += size
+		}
+
+		// 当前如果是活跃文件，需要重新修改活跃文件的写入指针
+		if uint32(i) == db.activeFile.FileID {
+			db.activeFile.WriteOff = offset
+		}
+	}
 	return nil
 }

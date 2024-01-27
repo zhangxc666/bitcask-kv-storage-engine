@@ -24,3 +24,25 @@ type Item struct {
 func (ai *Item) Less(bi btree.Item) bool {
 	return bytes.Compare(ai.key, bi.(*Item).key) == -1
 }
+
+// IndexType 相当于起了个别名
+type IndexType = int8
+
+const (
+	// Btree 索引类型
+	Btree IndexType = iota + 1
+	// ART 自适应基数树索引
+	ART
+)
+
+func NewIndexer(indexType IndexType) Indexer {
+	switch indexType {
+	case Btree:
+		return NewBTree()
+	case ART:
+		// TODO
+		return nil
+	default:
+		panic("unsupported index type")
+	}
+}
