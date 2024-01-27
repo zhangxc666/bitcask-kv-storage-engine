@@ -164,6 +164,27 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	return logRecord.Value, nil
 }
 
+func (db *DB) Delete(key []byte) error {
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+	if pos := db.index.Get(key); pos == nil {
+		return nil
+	}
+	logRecord := &data.LogRecord{Key: key, Type: data.LogRecordDeleted}
+
+	_, err := db.appendLogRecord(logRecord)
+	if err != nil {
+		return err
+	}
+
+	// 从内存索引中将对应的key删除
+	if ok := db.index.Delete(key); !ok {
+		return ErrIndexUpdateFailed
+	}
+	return nil
+}
+
 // appendLogRecord 追加写入到活跃文件中
 func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
 	db.mu.Lock()
@@ -249,13 +270,16 @@ func (db *DB) loadIndexerFromDataFile() error {
 			//构建内存索引并保存
 			logRecordPos := &data.LogRecordPos{Fid: fileID, Offset: offset}
 
+			var ok bool
 			// 如果当前的记录是被删除的
 			if logRecord.Type == data.LogRecordDeleted {
-				db.index.Delete(logRecord.Key)
+				ok = db.index.Delete(logRecord.Key)
 			} else {
-				db.index.Put(logRecord.Key, logRecordPos)
+				ok = db.index.Put(logRecord.Key, logRecordPos)
 			}
-
+			if !ok {
+				return ErrIndexUpdateFailed
+			}
 			offset += size
 		}
 
