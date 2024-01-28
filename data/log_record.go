@@ -7,6 +7,8 @@ const (
 	LogRecordDeleted
 )
 
+const maxLogRecordHeaderSize = 15
+
 // LogRecordPos 数据内存索引，主要描述数据在磁盘上的位置
 type LogRecordPos struct {
 	Fid    uint32 // 文件id，表示数据存储到哪个文件中
@@ -21,7 +23,23 @@ type LogRecord struct {
 	Type  LogRecordType
 }
 
+// LogRecord的头部信息
+type logRecordHeader struct {
+	crc        uint32        // crc校验值
+	recordType LogRecordType // 标识是否删除
+	keySize    uint32        // key的长度
+	valueSize  uint32        // value的长度
+}
+
 // EncodeLogRecord 对应logRecord进行编码
 func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
 	return nil, 0
+}
+
+func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
+	return nil, 0
+}
+
+func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
+	return 0
 }
