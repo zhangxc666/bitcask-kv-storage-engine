@@ -14,6 +14,20 @@ type Indexer interface {
 	Get(key []byte) *data.LogRecordPos
 	// Delete 根据key删除对应的索引位置信息
 	Delete(key []byte) bool
+
+	Size() int
+	Iterator(reverse bool) Iterator // 返回迭代器
+}
+
+type Iterator interface {
+	Rewind()                   // 重新回到迭代器起点
+	Seek(key []byte)           // 找到第一个大于等于key的位置，从这个位置向后遍历
+	Next()                     // 下一个key
+	Valid() bool               // 是否遍历完所有的key
+	Key() []byte               // 当前位置的key
+	Value() *data.LogRecordPos // 当前位置的value
+	Close()                    // 关闭迭代器释放资源
+
 }
 
 type Item struct {

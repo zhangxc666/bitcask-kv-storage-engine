@@ -13,7 +13,7 @@ import (
 
 type DB struct {
 	options    Options
-	mu         *sync.Mutex
+	mu         *sync.RWMutex
 	fileIDs    []int                     // 文件ID列表，仅用于加载索引的使用，不能在其他地方更新和使用
 	activeFile *data.DataFile            // 当前活跃文件，用于写入
 	olderFile  map[uint32]*data.DataFile // 旧的数据文件，仅用于读
@@ -35,7 +35,7 @@ func Open(option Options) (*DB, error) {
 
 	db := &DB{
 		options:   option,
-		mu:        new(sync.Mutex),
+		mu:        new(sync.RWMutex),
 		olderFile: make(map[uint32]*data.DataFile),
 		index:     index.NewIndexer(option.IndexType),
 	}
@@ -46,7 +46,6 @@ func Open(option Options) (*DB, error) {
 	}
 
 	// 加载数据索引
-
 	if err := db.loadIndexerFromDataFile(); err != nil {
 		return nil, err
 	}
@@ -103,6 +102,35 @@ func checkOptions(option Options) error {
 	return nil
 }
 
+func (db *DB) Close() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	// 关闭当前活跃文件
+	if err := db.activeFile.Close(); err != nil {
+		return err
+	}
+	// 关闭旧的数据文件
+	for _, file := range db.olderFile {
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *DB) Sync() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.activeFile.Sync()
+}
+
 // Put DB写入Key、Value
 func (db *DB) Put(key []byte, value []byte) error {
 	// key为空时
@@ -140,28 +168,8 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	if logRecordPos == nil {
 		return nil, ErrKeyNotFound
 	}
-	fileID := logRecordPos.Fid
-	offset := logRecordPos.Offset
-	var dataFile *data.DataFile
-	if db.activeFile.FileID == fileID {
-		dataFile = db.activeFile
-	} else {
-		dataFile = db.olderFile[fileID]
-	}
-	// dataFile不存在
-	if dataFile == nil {
-		return nil, ErrDataFileNotFound
-	}
-	// 读取对应的文件
-	logRecord, _, err := dataFile.ReadLogRecord(offset)
-	if err != nil {
-		return nil, err
-	}
-	// 已经被删除了
-	if logRecord.Type == data.LogRecordDeleted {
-		return nil, ErrKeyNotFound
-	}
-	return logRecord.Value, nil
+	// 从数据文件中获取value
+	return db.getValueByPosition(logRecordPos)
 }
 
 func (db *DB) Delete(key []byte) error {
@@ -286,6 +294,60 @@ func (db *DB) loadIndexerFromDataFile() error {
 		// 当前如果是活跃文件，需要重新修改活跃文件的写入指针
 		if uint32(i) == db.activeFile.FileID {
 			db.activeFile.WriteOff = offset
+		}
+	}
+	return nil
+}
+
+func (db *DB) getValueByPosition(pos *data.LogRecordPos) ([]byte, error) {
+	fileID := pos.Fid
+	offset := pos.Offset
+	var dataFile *data.DataFile
+	if db.activeFile.FileID == fileID {
+		dataFile = db.activeFile
+	} else {
+		dataFile = db.olderFile[fileID]
+	}
+	// dataFile不存在
+	if dataFile == nil {
+		return nil, ErrDataFileNotFound
+	}
+	// 读取对应的文件
+	logRecord, _, err := dataFile.ReadLogRecord(offset)
+	if err != nil {
+		return nil, err
+	}
+	// 已经被删除了
+	if logRecord.Type == data.LogRecordDeleted {
+		return nil, ErrKeyNotFound
+	}
+	return logRecord.Value, nil
+}
+
+// ListKeys 获取数据库中的所有key
+func (db *DB) ListKeys() [][]byte {
+	iterator := db.index.Iterator(false)
+	keys := make([][]byte, db.index.Size())
+	var idx int
+	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+		keys[idx] = iterator.Key()
+		idx++
+	}
+	return keys
+}
+
+// Fold 获取所有的数据，根据用户自定义的函数进行操作
+func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	iter := db.index.Iterator(false)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		value, err := db.getValueByPosition(iter.Value())
+		if err != nil {
+			return err
+		}
+		if !fn(iter.Key(), value) {
+			break
 		}
 	}
 	return nil

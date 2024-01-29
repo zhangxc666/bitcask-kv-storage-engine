@@ -1,6 +1,7 @@
 package tiny_kvDB
 
 import (
+	"bytes"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
@@ -11,7 +12,8 @@ import (
 func destroyDB(db *DB) {
 	if db != nil {
 		if db.activeFile != nil {
-			_ = db.activeFile.Close()
+			if err := db.Close(); err != nil {
+			}
 		}
 		err := os.RemoveAll(db.options.DirPath)
 		if err != nil {
@@ -68,10 +70,11 @@ func TestDB_Put(t *testing.T) {
 		assert.Nil(t, err)
 	}
 	assert.Equal(t, 2, len(db.olderFile))
-	//6、重启后再Put
-	err = db.activeFile.Close()
+
+	err = db.Close()
 	assert.Nil(t, err)
 
+	//6、重启后再Put
 	db2, err := Open(opts)
 	assert.Nil(t, err)
 	assert.NotNil(t, db2)
@@ -141,10 +144,104 @@ func TestDB_Delete(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, val)
 
+	err = db.Close()
+	assert.Nil(t, err)
+
 	//重启之后在进行校验
 	db2, err := Open(opts)
 	assert.Nil(t, err)
 	assert.NotNil(t, db2)
 	val1, _ := db2.Get(utils.GetTestKey(1))
 	assert.Equal(t, val1, val)
+}
+
+func TestDB_Fold(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-listkeys")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	err = db.Put(utils.GetTestKey(10), utils.RandomValue(10))
+	assert.Nil(t, err)
+	err = db.Put(utils.GetTestKey(11), utils.RandomValue(11))
+	assert.Nil(t, err)
+	err = db.Put(utils.GetTestKey(12), utils.RandomValue(12))
+	assert.Nil(t, err)
+	err = db.Put(utils.GetTestKey(13), utils.RandomValue(13))
+	assert.Nil(t, err)
+	f := func(key []byte, value []byte) bool {
+		assert.NotNil(t, key)
+		assert.NotNil(t, value)
+		if bytes.Compare(key, utils.GetTestKey(12)) == 0 {
+			return false
+		}
+		return true
+	}
+	err = db.Fold(f)
+	assert.Nil(t, err)
+}
+
+func TestDB_ListKeys(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-listkeys")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	// 为空
+	keys := db.ListKeys()
+	assert.Equal(t, 0, len(keys))
+
+	// 只有一条数据
+	err = db.Put(utils.GetTestKey(1), utils.RandomValue(1))
+	assert.Nil(t, err)
+	key2 := db.ListKeys()
+	assert.Equal(t, 1, len(key2))
+
+	// 多条数据
+	err = db.Put(utils.GetTestKey(12), utils.RandomValue(12))
+	assert.Nil(t, err)
+	err = db.Put(utils.GetTestKey(13), utils.RandomValue(13))
+	assert.Nil(t, err)
+	key3 := db.ListKeys()
+	assert.Nil(t, err)
+	assert.Equal(t, 3, len(key3))
+}
+
+func TestDB_Close(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-close")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	err = db.Put(utils.GetTestKey(1), utils.RandomValue(1))
+	assert.Nil(t, err)
+}
+
+func TestDB_Sync(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-close")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	err = db.Put(utils.GetTestKey(1), utils.RandomValue(1))
+	assert.Nil(t, err)
+
+	err = db.Sync()
+	assert.Nil(t, err)
 }
