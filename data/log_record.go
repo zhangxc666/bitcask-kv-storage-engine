@@ -10,6 +10,7 @@ type LogRecordType = byte
 const (
 	LogRecordNormal LogRecordType = iota
 	LogRecordDeleted
+	LogRecordTxnFinished
 )
 
 const maxLogRecordHeaderSize = 15
@@ -34,6 +35,12 @@ type logRecordHeader struct {
 	recordType LogRecordType // 标识是否删除
 	keySize    uint32        // key的长度
 	valueSize  uint32        // value的长度
+}
+
+// TransactionRecord 事务记录，存储logRecord和索引信息
+type TransactionRecord struct {
+	Record *LogRecord
+	Pos    *LogRecordPos
 }
 
 // logRecord 4    1           5        5         key     value

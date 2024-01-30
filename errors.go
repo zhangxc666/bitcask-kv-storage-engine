@@ -10,4 +10,5 @@ var (
 	ErrDatabaseDirIsEmpty     = errors.New("database dir is empty")
 	ErrDataSizeIsInvalid      = errors.New("data size is not valid")
 	ErrDataDirectoryCorrupted = errors.New("the database directory maybe corrupted")
+	ErrExceedMaxBatchNum      = errors.New("exceed max batch number")
 )
