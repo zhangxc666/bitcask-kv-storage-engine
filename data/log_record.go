@@ -71,6 +71,14 @@ func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
 	return retBytes, int64(sumLen)
 }
 
+func EncodeLogRecordPos(pos *LogRecordPos) []byte {
+	buf := make([]byte, binary.MaxVarintLen32+binary.MaxVarintLen64)
+	var index = 0
+	index += binary.PutVarint(buf[index:], int64(pos.Fid))
+	index += binary.PutVarint(buf[index:], pos.Offset)
+	return buf[:index]
+}
+
 func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
 	if len(buf) <= 4 { // crc未传到
 		return nil, 0
@@ -88,6 +96,14 @@ func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
 	header.keySize = uint32(keySize)
 	header.valueSize = uint32(valueSize)
 	return header, int64(index)
+}
+
+func DecodeLogRecordPos(buf []byte) *LogRecordPos {
+	var index = 0
+	fileID, n := binary.Varint(buf[index:])
+	index += n
+	offset, _ := binary.Varint(buf[index:])
+	return &LogRecordPos{Fid: uint32(fileID), Offset: offset}
 }
 
 func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {

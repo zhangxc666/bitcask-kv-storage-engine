@@ -3,6 +3,7 @@ package tiny_kvDB
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ type DB struct {
 	olderFile  map[uint32]*data.DataFile // 旧的数据文件，仅用于读
 	index      index.Indexer             // 内存索引
 	seqNo      uint64                    // 事务序列号，全局递增
+	isMerging  bool                      // 是否正在merge
 }
 
 // Open 打开kv存储引擎
@@ -39,6 +41,16 @@ func Open(option Options) (*DB, error) {
 		mu:        new(sync.RWMutex),
 		olderFile: make(map[uint32]*data.DataFile),
 		index:     index.NewIndexer(option.IndexType),
+	}
+
+	// 加载merge数据目录
+	if err := db.loadMergeFile(); err != nil {
+		return nil, err
+	}
+
+	// 从hint文件中加载索引文件
+	if err := db.loadIndexFromHintFile(); err != nil {
+		return nil, err
 	}
 
 	// 加载数据文件
@@ -99,6 +111,17 @@ func (db *DB) loadIndexerFromDataFile() error {
 		return nil
 	}
 
+	hasMerge, nonMergeFileID := false, uint32(0)
+	mergeFinishedFileName := filepath.Join(db.options.DirPath, data.MergeFinishedFileName)
+	if _, err := os.Stat(mergeFinishedFileName); err == nil {
+		fileID, err := db.getNonMergeFileID(db.options.DirPath)
+		if err != nil {
+			return err
+		}
+		hasMerge = true
+		nonMergeFileID = fileID
+	}
+
 	// 更新内存索引函数
 	updateIndex := func(key []byte, typ data.LogRecordType, pos *data.LogRecordPos) {
 		var ok bool
@@ -120,6 +143,12 @@ func (db *DB) loadIndexerFromDataFile() error {
 	// 遍历所有的dataFile
 	for i, fid := range db.fileIDs {
 		fileID := uint32(fid)
+
+		// 当前fileID比nonMergeFileID，此时索引已经从hint文件加载过了
+		if hasMerge && fileID < nonMergeFileID {
+			continue
+		}
+		
 		var dataFile *data.DataFile
 		if fileID == db.activeFile.FileID {
 			dataFile = db.activeFile
