@@ -20,6 +20,11 @@ type WriteBatch struct {
 
 // NewWriteBatch 初始化WriteBatch
 func (db *DB) NewWriteBatch(opt WriteBatchOptions) *WriteBatch {
+	// 在B+树索引模式下，seqNo文件不存在，且不是第一次加载
+	// 此时无法执行事务操作
+	if db.options.IndexType == BPlusTree && !db.seqNoFileExists && !db.isInitial {
+		panic("can not use write batch, seq-no file not exists")
+	}
 	return &WriteBatch{
 		options:       opt,
 		mu:            new(sync.Mutex),
