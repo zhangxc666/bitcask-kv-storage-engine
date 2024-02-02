@@ -2,9 +2,11 @@ package tiny_kvDB
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"time"
 	"tiny-kvDB/utils"
 )
 
@@ -28,6 +30,37 @@ func TestOpen(t *testing.T) {
 	opts.DirPath = dir
 	db, err := Open(opts)
 	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+}
+
+func TestMuchDatas(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go")
+	fmt.Println(dir)
+	opts.DirPath = dir
+	db, err := Open(opts)
+	//defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	for i := 0; i < 10000000; i++ {
+		err := db.Put(utils.GetTestKey(1), utils.RandomValue(1))
+		assert.Nil(t, err)
+	}
+
+}
+
+// 测试使用mmap打开的时间差
+func TestOpen2(t *testing.T) {
+	opt := DefaultOptions
+	opt.DirPath = "/tmp/bitcask-go843619074"
+	opt.MMapAtStartup = false
+
+	now := time.Now()
+	db, err := Open(opt)
+	t.Log("open times ", time.Since(now))
+
 	assert.Nil(t, err)
 	assert.NotNil(t, db)
 }
@@ -243,5 +276,29 @@ func TestDB_Sync(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = db.Sync()
+	assert.Nil(t, err)
+}
+
+func TestDB_FileLock(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-close")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	_, err = Open(opts)
+	assert.Equal(t, ErrDataBaseIsUsing, err)
+
+	err = db.Close()
+	assert.Nil(t, err)
+
+	db2, err := Open(opts)
+	assert.Nil(t, err)
+	assert.NotNil(t, db2)
+
+	err = db2.Close()
 	assert.Nil(t, err)
 }

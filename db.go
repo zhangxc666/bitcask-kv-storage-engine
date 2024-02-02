@@ -1,6 +1,8 @@
 package tiny_kvDB
 
 import (
+	"fmt"
+	"github.com/gofrs/flock"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,10 +11,14 @@ import (
 	"strings"
 	"sync"
 	"tiny-kvDB/data"
+	"tiny-kvDB/fio"
 	"tiny-kvDB/index"
 )
 
-const seqNoKey = "seq.no"
+const (
+	seqNoKey     = "seq.no"
+	fileLockName = "flock"
+)
 
 type DB struct {
 	options         Options
@@ -25,6 +31,8 @@ type DB struct {
 	isMerging       bool                      // 是否正在merge
 	seqNoFileExists bool                      // seqNo文件是否存在
 	isInitial       bool                      // 是否是第一次初始化当前数据库
+	fileLock        *flock.Flock              // 文件所保证多数据间的互斥
+	bytesWrite      uint                      // 累计写了多少字节
 }
 
 // Open 打开kv存储引擎
@@ -42,6 +50,17 @@ func Open(option Options) (*DB, error) {
 			return nil, err
 		}
 	}
+
+	// 判断当前数据目录是否正在使用
+	fileLock := flock.New(filepath.Join(option.DirPath, fileLockName))
+	hold, err := fileLock.TryLock()
+	if err != nil {
+		return nil, err
+	}
+	if !hold {
+		return nil, ErrDataBaseIsUsing
+	}
+
 	entries, err := os.ReadDir(option.DirPath)
 	if err != nil {
 		return nil, err
@@ -57,6 +76,7 @@ func Open(option Options) (*DB, error) {
 		olderFile: make(map[uint32]*data.DataFile),
 		index:     index.NewIndexer(option.IndexType, option.DirPath, option.SyncWrites),
 		isInitial: isInit,
+		fileLock:  fileLock,
 	}
 
 	// 加载merge数据目录
@@ -96,6 +116,12 @@ func Open(option Options) (*DB, error) {
 		return nil, err
 	}
 
+	// 重置文件IO
+	if db.options.MMapAtStartup {
+		if err := db.resetToType(); err != nil {
+			return nil, err
+		}
+	}
 	return db, nil
 }
 
@@ -123,7 +149,11 @@ func (db *DB) loadDataFiles() error {
 	sort.Ints(fileIDs)
 	db.fileIDs = fileIDs
 	for i, fileID := range fileIDs {
-		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fileID))
+		ioType := fio.StandardFileIO
+		if db.options.MMapAtStartup {
+			ioType = fio.MemoryFileMap
+		}
+		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fileID), ioType)
 		if err != nil {
 			return err
 		}
@@ -275,6 +305,11 @@ func checkOptions(option Options) error {
 }
 
 func (db *DB) Close() error {
+	defer func() {
+		if err := db.fileLock.Unlock(); err != nil {
+			panic(fmt.Sprintf("failed to unlock the directory, %v", err))
+		}
+	}()
 	if db.activeFile == nil {
 		return nil
 	}
@@ -423,10 +458,20 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 	if err := db.activeFile.Write(encRecord); err != nil {
 		return nil, err
 	}
+
+	db.bytesWrite += uint(size)
 	// 根据用户配置决定是否持久化写入
-	if db.options.SyncWrites {
+	var needSync = db.options.SyncWrites
+	// 判断根据字节数同步是否需要持久化
+	if !needSync && db.options.BytePerSync > 0 && db.bytesWrite >= db.options.BytePerSync {
+		needSync = true
+	}
+	if needSync {
 		if err := db.activeFile.Sync(); err != nil {
 			return nil, err
+		}
+		if db.bytesWrite > 0 {
+			db.bytesWrite = 0
 		}
 	}
 	// 构造内存索引信息
@@ -442,7 +487,7 @@ func (db *DB) setActiveDataFile() error {
 		initialFileID = db.activeFile.FileID + 1
 	}
 	// 打开新的数据文件
-	dataFile, err := data.OpenDataFile(db.options.DirPath, initialFileID)
+	dataFile, err := data.OpenDataFile(db.options.DirPath, initialFileID, fio.StandardFileIO)
 	if err != nil {
 		return err
 	}
@@ -501,6 +546,22 @@ func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
 		}
 		if !fn(iter.Key(), value) {
 			break
+		}
+	}
+	return nil
+}
+
+// 将数据文件IO 设置为标准文件IO
+func (db *DB) resetToType() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	if err := db.activeFile.SetIOManager(db.options.DirPath, fio.StandardFileIO); err != nil {
+		return err
+	}
+	for _, dataFile := range db.olderFile {
+		if err := dataFile.SetIOManager(db.options.DirPath, fio.StandardFileIO); err != nil {
+			return err
 		}
 	}
 	return nil

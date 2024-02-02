@@ -5,24 +5,25 @@ import (
 	"os"
 	"testing"
 	"tiny-kvDB/data"
+	"tiny-kvDB/fio"
 )
 
 func TestOpenDataFile(t *testing.T) {
-	datafile1, err := data.OpenDataFile(os.TempDir(), 0)
+	datafile1, err := data.OpenDataFile(os.TempDir(), 0, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile1)
 
-	datafile2, err := data.OpenDataFile(os.TempDir(), 1)
+	datafile2, err := data.OpenDataFile(os.TempDir(), 1, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile2)
 
-	datafile3, err := data.OpenDataFile(os.TempDir(), 0)
+	datafile3, err := data.OpenDataFile(os.TempDir(), 0, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile3)
 }
 
 func TestDataFile_Write(t *testing.T) {
-	datafile1, err := data.OpenDataFile(os.TempDir(), 0)
+	datafile1, err := data.OpenDataFile(os.TempDir(), 0, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile1)
 	err = datafile1.Write([]byte("aaa"))
@@ -34,7 +35,7 @@ func TestDataFile_Write(t *testing.T) {
 }
 
 func TestDataFile_Close(t *testing.T) {
-	datafile1, err := data.OpenDataFile(os.TempDir(), 0)
+	datafile1, err := data.OpenDataFile(os.TempDir(), 0, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile1)
 
@@ -43,7 +44,7 @@ func TestDataFile_Close(t *testing.T) {
 }
 
 func TestDataFile_Sync(t *testing.T) {
-	datafile1, err := data.OpenDataFile(os.TempDir(), 0)
+	datafile1, err := data.OpenDataFile(os.TempDir(), 0, fio.StandardFileIO)
 	assert.Nil(t, err)
 	assert.NotNil(t, datafile1)
 

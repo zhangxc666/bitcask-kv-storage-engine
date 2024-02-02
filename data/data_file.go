@@ -28,35 +28,35 @@ type DataFile struct {
 }
 
 // OpenDataFile 打开新的数据文件
-func OpenDataFile(dirPath string, fileID uint32) (*DataFile, error) {
+func OpenDataFile(dirPath string, fileID uint32, ioType fio.FileIOTye) (*DataFile, error) {
 	fileName := GetDataFileName(dirPath, fileID)
-	return newDataFile(fileName, fileID)
+	return newDataFile(fileName, fileID, ioType)
 }
 
 // OpenHintFile 打开新的hint索引文件
 func OpenHintFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, HintFileName)
-	return newDataFile(fileName, 0)
+	return newDataFile(fileName, 0, fio.StandardFileIO)
 }
 
 // OpenMergeFinishedFile 打开标识merge完成的文件
 func OpenMergeFinishedFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, MergeFinishedFileName)
-	return newDataFile(fileName, 0)
+	return newDataFile(fileName, 0, fio.StandardFileIO)
 }
 
 // OpenSeqNodFile 打开存储事务序列号的文件
 func OpenSeqNodFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, SeqNoFileName)
-	return newDataFile(fileName, 0)
+	return newDataFile(fileName, 0, fio.StandardFileIO)
 }
 
 func GetDataFileName(dirPath string, fileID uint32) string {
 	return filepath.Join(dirPath, fmt.Sprintf("%09d", fileID)+DataFileNameSuffix)
 }
-func newDataFile(fileName string, fileID uint32) (*DataFile, error) {
+func newDataFile(fileName string, fileID uint32, ioType fio.FileIOTye) (*DataFile, error) {
 	// 初始化IO管理器
-	ioManager, err := fio.NewIOManager(fileName)
+	ioManager, err := fio.NewIOManager(fileName, ioType)
 	if err != nil {
 		return nil, err
 	}
@@ -149,4 +149,17 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 		return nil, 0, ErrInvalidCRC
 	}
 	return logRecord, recordSize, nil
+}
+
+// SetIOManager 重新设置IOManager
+func (df *DataFile) SetIOManager(dirPath string, ioType fio.FileIOTye) error {
+	if err := df.IOManager.Close(); err != nil {
+		return err
+	}
+	ioManager, err := fio.NewIOManager(GetDataFileName(dirPath, df.FileID), ioType)
+	if err != nil {
+		return err
+	}
+	df.IOManager = ioManager
+	return nil
 }
