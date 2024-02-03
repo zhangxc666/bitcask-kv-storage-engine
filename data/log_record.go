@@ -19,6 +19,7 @@ const maxLogRecordHeaderSize = 15
 type LogRecordPos struct {
 	Fid    uint32 // 文件id，表示数据存储到哪个文件中
 	Offset int64  // 偏移，表示数据存在文件哪个位置
+	Size   uint32 // 表示数据在磁盘上的大小
 }
 
 // LogRecord 写入到数据文件的记录
@@ -72,10 +73,11 @@ func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
 }
 
 func EncodeLogRecordPos(pos *LogRecordPos) []byte {
-	buf := make([]byte, binary.MaxVarintLen32+binary.MaxVarintLen64)
+	buf := make([]byte, binary.MaxVarintLen32*2+binary.MaxVarintLen64)
 	var index = 0
 	index += binary.PutVarint(buf[index:], int64(pos.Fid))
 	index += binary.PutVarint(buf[index:], pos.Offset)
+	index += binary.PutVarint(buf[index:], int64(pos.Size))
 	return buf[:index]
 }
 
@@ -102,8 +104,10 @@ func DecodeLogRecordPos(buf []byte) *LogRecordPos {
 	var index = 0
 	fileID, n := binary.Varint(buf[index:])
 	index += n
-	offset, _ := binary.Varint(buf[index:])
-	return &LogRecordPos{Fid: uint32(fileID), Offset: offset}
+	offset, n := binary.Varint(buf[index:])
+	index += n
+	size, _ := binary.Varint(buf[index:])
+	return &LogRecordPos{Fid: uint32(fileID), Offset: offset, Size: uint32(size)}
 }
 
 func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {

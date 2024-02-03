@@ -9,11 +9,11 @@ import (
 // Indexer 抽象索引接口，后续想加入数据结构实现当前接口
 type Indexer interface {
 	// Put 向索引中存储key对应的数据位置信息
-	Put(key []byte, pos *data.LogRecordPos) bool
+	Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos
 	// Get 根据key存储索引位置信息
 	Get(key []byte) *data.LogRecordPos
 	// Delete 根据key删除对应的索引位置信息
-	Delete(key []byte) bool
+	Delete(key []byte) (*data.LogRecordPos, bool)
 
 	Size() int
 	Close() error                   // 关闭索引
@@ -55,10 +55,10 @@ func NewIndexer(indexType IndexType, dirPath string, sync bool) Indexer {
 	switch indexType {
 	case Btree:
 		return NewBTree()
-	case ART:
-		return NewART()
-	case BPTree:
-		return NewBPlusTree(dirPath, sync)
+	//case ART:
+	//	return NewART()
+	//case BPTree:
+	//	return NewBPlusTree(dirPath, sync)
 	default:
 		panic("unsupported index type")
 	}

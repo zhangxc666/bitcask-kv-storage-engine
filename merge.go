@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"tiny-kvDB/data"
+	"tiny-kvDB/utils"
 )
 
 const (
@@ -30,6 +31,27 @@ func (db *DB) Merge() error {
 	}
 	db.isMerging = true
 	defer func() { db.isMerging = false }()
+
+	totalSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	// 查看当前merge的数据是否达到了阈值
+	if float32(db.reclaimSize)/float32(totalSize) < db.options.DataFileMergeRatio {
+		db.mu.Unlock()
+		return ErrMergeRatioUnreached
+	}
+
+	// 查看剩余空间容量时否可以容量merge后的文件大小
+	availableSize, err := utils.AvailableDiskSize()
+	if err != nil {
+		db.mu.Unlock()
+		return err
+	}
+	if uint64(totalSize-db.reclaimSize) >= availableSize {
+		db.mu.Unlock()
+		return ErrNoEnoughSpaceForMerge
+	}
 
 	// 持久化活跃文件
 	if err := db.activeFile.Sync(); err != nil {
@@ -101,7 +123,6 @@ func (db *DB) Merge() error {
 
 			// 此时内存索引的数据和当前数据文件的数据是一样的，表示当前数据是有效的
 			if logRecordPos != nil && logRecordPos.Offset == offset && logRecordPos.Fid == dataFile.FileID {
-
 				// 清除事务标记
 				logRecord.Key = logRecordKeyWithSeq(realKey, nonTransactionSeqNo)
 				pos, err := mergeDB.appendLogRecord(logRecord)
@@ -180,6 +201,9 @@ func (db *DB) loadMergeFile() error {
 			break
 		}
 		if entry.Name() == data.SeqNoFileName {
+			continue
+		}
+		if entry.Name() == fileLockName {
 			continue
 		}
 		mergeFileNames = append(mergeFileNames, entry.Name())

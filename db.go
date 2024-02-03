@@ -13,6 +13,7 @@ import (
 	"tiny-kvDB/data"
 	"tiny-kvDB/fio"
 	"tiny-kvDB/index"
+	"tiny-kvDB/utils"
 )
 
 const (
@@ -33,6 +34,35 @@ type DB struct {
 	isInitial       bool                      // 是否是第一次初始化当前数据库
 	fileLock        *flock.Flock              // 文件所保证多数据间的互斥
 	bytesWrite      uint                      // 累计写了多少字节
+	reclaimSize     int64                     // 表示有多少数据是无效的
+}
+
+// Stat 存储引擎统计状态
+type Stat struct {
+	KeyNum          uint32 // key的总数量
+	DataFileNum     uint32 // 数据文件数量
+	ReclaimableSize int64  // 可以回收的数据量
+	DiskSize        int64  // 数据目录占用的总数据量
+}
+
+// Stat 返回数据库的相关统计信息
+func (db *DB) Stat() *Stat {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	var dataFiles = uint32(len(db.olderFile))
+	if db.activeFile != nil {
+		dataFiles += 1
+	}
+	dirSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get dir size : %v", err))
+	}
+	return &Stat{
+		KeyNum:          uint32(db.index.Size()),
+		DataFileNum:     dataFiles,
+		ReclaimableSize: db.reclaimSize,
+		DiskSize:        dirSize,
+	}
 }
 
 // Open 打开kv存储引擎
@@ -187,15 +217,18 @@ func (db *DB) loadIndexerFromDataFile() error {
 
 	// 更新内存索引函数
 	updateIndex := func(key []byte, typ data.LogRecordType, pos *data.LogRecordPos) {
-		var ok bool
+		var (
+			oldPos *data.LogRecordPos
+		)
 		// 如果当前的记录是被删除的
 		if typ == data.LogRecordDeleted {
-			ok = db.index.Delete(key)
+			oldPos, _ = db.index.Delete(key)
+			db.reclaimSize += int64(pos.Size)
 		} else {
-			ok = db.index.Put(key, pos)
+			oldPos = db.index.Put(key, pos)
 		}
-		if !ok {
-			panic("failed to update index!")
+		if oldPos != nil {
+			db.reclaimSize += int64(oldPos.Size)
 		}
 	}
 
@@ -230,7 +263,7 @@ func (db *DB) loadIndexerFromDataFile() error {
 				return err
 			}
 			//构建内存索引并保存
-			logRecordPos := &data.LogRecordPos{Fid: fileID, Offset: offset}
+			logRecordPos := &data.LogRecordPos{Fid: fileID, Offset: offset, Size: uint32(size)}
 
 			// 解析当前key的事务序列号
 			realKey, seqNo := parseLogRecordKey(logRecord.Key)
@@ -300,6 +333,9 @@ func checkOptions(option Options) error {
 	}
 	if option.DataFileSize <= 0 {
 		return ErrDataSizeIsInvalid
+	}
+	if option.DataFileMergeRatio < 0 || option.DataFileMergeRatio > 1 {
+		return ErrMergeRatioIsInvalid
 	}
 	return nil
 }
@@ -379,8 +415,8 @@ func (db *DB) Put(key []byte, value []byte) error {
 		return err
 	}
 	// 更新索引
-	if ok := db.index.Put(key, pos); !ok {
-		return ErrIndexUpdateFailed
+	if oldPos := db.index.Put(key, pos); oldPos != nil {
+		db.reclaimSize += int64(oldPos.Size)
 	}
 	return nil
 }
@@ -413,14 +449,20 @@ func (db *DB) Delete(key []byte) error {
 		Type: data.LogRecordDeleted,
 	}
 
-	_, err := db.appendLogRecordWithLock(logRecord)
+	pos, err := db.appendLogRecordWithLock(logRecord)
 	if err != nil {
 		return err
 	}
 
+	// 当前记录本身是可删除的，也需要计算
+	db.reclaimSize += int64(pos.Size)
 	// 从内存索引中将对应的key删除
-	if ok := db.index.Delete(key); !ok {
+	oldPos, ok := db.index.Delete(key)
+	if !ok {
 		return ErrIndexUpdateFailed
+	}
+	if oldPos != nil {
+		db.reclaimSize += int64(oldPos.Size)
 	}
 	return nil
 }
@@ -475,7 +517,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 		}
 	}
 	// 构造内存索引信息
-	pos := &data.LogRecordPos{Fid: db.activeFile.FileID, Offset: writeOff}
+	pos := &data.LogRecordPos{Fid: db.activeFile.FileID, Offset: writeOff, Size: uint32(size)}
 	return pos, nil
 
 }

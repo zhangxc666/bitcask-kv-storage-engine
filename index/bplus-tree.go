@@ -36,14 +36,19 @@ func NewBPlusTree(dirPath string, syncWrite bool) *BPlusTree {
 	}
 }
 
-func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) bool {
+func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
+	var olderIt []byte
 	if err := bpt.tree.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
+		olderIt = bucket.Get(key)
 		return bucket.Put(key, data.EncodeLogRecordPos(pos))
 	}); err != nil {
 		panic("failed to put value in bptree")
 	}
-	return true
+	if len(olderIt) == 0 {
+		return nil
+	}
+	return data.DecodeLogRecordPos(olderIt)
 }
 
 // Get 根据key存储索引位置信息
@@ -63,19 +68,24 @@ func (bpt *BPlusTree) Get(key []byte) *data.LogRecordPos {
 }
 
 // Delete 根据key删除对应的索引位置信息
-func (bpt *BPlusTree) Delete(key []byte) bool {
-	var ok bool
+func (bpt *BPlusTree) Delete(key []byte) (*data.LogRecordPos, bool) {
+	var (
+		olderIt []byte
+	)
 	if err := bpt.tree.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
-		if value := bucket.Get(key); len(value) != 0 {
-			ok = true
+
+		if olderIt = bucket.Get(key); len(olderIt) != 0 {
 			return bucket.Delete(key)
 		}
 		return nil
 	}); err != nil {
 		panic("failed to delete value in bptree")
 	}
-	return ok
+	if len(olderIt) == 0 {
+		return nil, false
+	}
+	return data.DecodeLogRecordPos(olderIt), true
 }
 
 func (bpt *BPlusTree) Size() int {

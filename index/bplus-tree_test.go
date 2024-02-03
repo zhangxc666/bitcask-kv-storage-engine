@@ -1,6 +1,7 @@
 package index
 
 import (
+	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,4 +31,18 @@ func TestNew(t *testing.T) {
 		t.Log(string(iter.Key()))
 	}
 	iter.Close()
+}
+
+func TestBPlussTree_Put(t *testing.T) {
+	art := NewBTree()
+	res1 := art.Put([]byte("key-1"), &data.LogRecordPos{Fid: 1, Offset: 12})
+	assert.Nil(t, res1)
+
+	res2 := art.Put([]byte("key-2"), &data.LogRecordPos{Fid: 1, Offset: 12})
+	assert.Nil(t, res2)
+
+	res3 := art.Put([]byte("key-2"), &data.LogRecordPos{Fid: 2, Offset: 13})
+	assert.NotNil(t, res3)
+	assert.Equal(t, uint32(1), res3.Fid)
+	assert.Equal(t, int64(12), res3.Offset)
 }
