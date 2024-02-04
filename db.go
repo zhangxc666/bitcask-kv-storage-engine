@@ -65,6 +65,14 @@ func (db *DB) Stat() *Stat {
 	}
 }
 
+// Backup 备份数据库，将数据文件拷贝到新的目录
+func (db *DB) Backup(dir string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	// 排除文件锁文件
+	return utils.CopyDir(db.options.DirPath, dir, []string{fileLockName})
+}
+
 // Open 打开kv存储引擎
 func Open(option Options) (*DB, error) {
 	if err := checkOptions(option); err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 	"tiny-kvDB/utils"
@@ -330,4 +331,36 @@ func TestDB_Stat(t *testing.T) {
 
 	stat := db.Stat()
 	assert.NotNil(t, stat)
+}
+func TestBack(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-backup")
+	opts.DirPath = dir
+	opts.DataFileSize = 64 * 1024 * 1024
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	for i := 1; i < 10000; i++ {
+		err := db.Put(utils.GetTestKey(i), []byte(strconv.Itoa(i)))
+		assert.Nil(t, err)
+	}
+	backupDir, _ := os.MkdirTemp("", "bitcask-go-backup-test")
+	err = db.Backup(backupDir)
+	assert.Nil(t, err)
+
+	opts2 := DefaultOptions
+	opts2.DirPath = backupDir
+	db2, err := Open(opts2)
+	defer destroyDB(db2)
+	assert.Nil(t, err)
+	assert.NotNil(t, db2)
+
+	for i := 1; i < 10000; i++ {
+		val, err := db.Get(utils.GetTestKey(i))
+		assert.Nil(t, err)
+		assert.Equal(t, []byte(strconv.Itoa(i)), val)
+	}
+
 }
