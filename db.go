@@ -424,7 +424,9 @@ func (db *DB) Put(key []byte, value []byte) error {
 	}
 	// 更新索引
 	if oldPos := db.index.Put(key, pos); oldPos != nil {
+		db.mu.Lock()
 		db.reclaimSize += int64(oldPos.Size)
+		db.mu.Unlock()
 	}
 	return nil
 }
