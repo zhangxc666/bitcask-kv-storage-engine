@@ -78,3 +78,69 @@ func TestRedisDataStructure_Type(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, String, dataType)
 }
+
+func TestRedisDataStructure_HGet(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2 := utils.RandomValue(1), utils.RandomValue(2)
+	ok1, err := rds.HSet(utils.GetTestKey(1), []byte("k1"), v1)
+	assert.Nil(t, err)
+	assert.True(t, ok1)
+
+	ok2, err := rds.HSet(utils.GetTestKey(1), []byte("k1"), v2)
+	assert.Nil(t, err)
+	assert.False(t, ok2)
+
+	ok3, err := rds.HSet(utils.GetTestKey(1), []byte("k2"), v2)
+	assert.Nil(t, err)
+	assert.True(t, ok3)
+
+	value1, err := rds.HGet(utils.GetTestKey(1), []byte("k1"))
+	assert.Nil(t, err)
+	assert.Equal(t, v2, value1)
+
+	value2, err := rds.HGet(utils.GetTestKey(1), []byte("k2"))
+	assert.Nil(t, err)
+	assert.Equal(t, v2, value2)
+}
+
+func TestRedisDataStructure_HDel(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	ok, err := rds.HDel(utils.GetTestKey(1), []byte("ss"))
+	assert.Nil(t, err)
+	assert.False(t, ok)
+
+	v1, v2 := utils.RandomValue(1), utils.RandomValue(2)
+	ok1, err := rds.HSet(utils.GetTestKey(1), []byte("k1"), v1)
+	assert.Nil(t, err)
+	assert.True(t, ok1)
+
+	ok2, err := rds.HSet(utils.GetTestKey(1), []byte("k1"), v2)
+	assert.Nil(t, err)
+	assert.False(t, ok2)
+
+	ok3, err := rds.HSet(utils.GetTestKey(1), []byte("k2"), v2)
+	assert.Nil(t, err)
+	assert.True(t, ok3)
+
+	ok4, err := rds.HDel(utils.GetTestKey(1), []byte("k1"))
+	assert.True(t, ok4)
+	assert.Nil(t, err)
+
+	value, err := rds.HGet(utils.GetTestKey(1), []byte("k1"))
+	assert.Equal(t, tiny_kvDB.ErrKeyNotFound, err)
+	assert.Nil(t, value)
+}

@@ -86,3 +86,128 @@ func (rds *RedisDataStructure) Get(key []byte) ([]byte, error) {
 	// 合法，返回对应的value
 	return encValue[index:], nil
 }
+
+// HSet Hash 分成两部分，<key,meta>,<key+meta.version+field,value>
+func (rds *RedisDataStructure) HSet(key, field, value []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, Hash)
+	if err != nil {
+		return false, err
+	}
+	// 构造Hash数据部分的key，根据field查找value
+	hk := &hashInternalKey{
+		key:     key,
+		field:   field,
+		version: meta.version,
+	}
+	encKey := hk.encode()
+	// 查找对应key的field的数据是否存在
+	var exist = true
+	if _, err = rds.db.Get(encKey); errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		exist = false
+	}
+
+	// 不存在更新原数据（size增加）
+	// 还要新增<field,value>
+	// 以上操作需要保证原子性，使用writeBatch
+
+	// 更新元数据
+	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+	if !exist {
+		meta.size++
+		_ = wb.Put(key, meta.encode())
+	}
+
+	// 更新<key+version+field,value>
+	// 不管存不存在都要更新，存在就是修改，不存在就是新增
+	_ = wb.Put(encKey, value)
+	if err = wb.Commit(); err != nil {
+		return false, err
+	}
+	return !exist, nil
+}
+
+// HGet 找到<key+version+field,value>
+func (rds *RedisDataStructure) HGet(key, field []byte) ([]byte, error) {
+	meta, err := rds.findMetaData(key, Hash)
+	if err != nil {
+		return nil, err
+	}
+	if meta.size == 0 {
+		return nil, nil
+	}
+	hk := &hashInternalKey{
+		key:     key,
+		version: meta.version,
+		field:   field,
+	}
+	encKey := hk.encode()
+	return rds.db.Get(encKey)
+}
+
+func (rds *RedisDataStructure) HDel(key []byte, field []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, Hash)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+	hk := &hashInternalKey{
+		key:     key,
+		version: meta.version,
+		field:   field,
+	}
+	encKey := hk.encode()
+	// 先看是否存在
+	var exist = true
+	if _, err := rds.db.Get(encKey); errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		exist = false
+	}
+	// 更新元数据
+	if exist {
+		wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+		meta.size--
+		_ = wb.Put(key, meta.encode())
+		_ = wb.Delete(encKey)
+		if err = wb.Commit(); err != nil {
+			return true, err
+		}
+	}
+	return exist, nil
+}
+
+// 找到元数据
+func (rds *RedisDataStructure) findMetaData(key []byte, dataType redisDataType) (*metadata, error) {
+	metaBuf, err := rds.db.Get(key)
+	if err != nil && !errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		return nil, err
+	}
+	var meta *metadata
+	var exist = true
+	if errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		exist = false
+	} else {
+		meta = decodeMetaData(metaBuf)
+		// 判断数据类型是否匹配
+		if meta.dataType != dataType {
+			return nil, ErrWrongTypeOperation
+		}
+		// 判断过期时间
+		if meta.expire != 0 && meta.expire <= time.Now().UnixNano() {
+			exist = false
+		}
+	}
+	if !exist {
+		meta = &metadata{
+			dataType: dataType,
+			expire:   0,
+			version:  time.Now().UnixNano(),
+			size:     0,
+		}
+		if dataType == List {
+			meta.head = initialListMark
+			meta.tail = initialListMark
+		}
+	}
+	return meta, nil
+}
