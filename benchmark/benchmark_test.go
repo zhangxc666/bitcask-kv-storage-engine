@@ -38,11 +38,6 @@ func Benchmark_Put(b *testing.B) {
 }
 
 func Benchmark_Get(b *testing.B) {
-	for i := 0; i < 10000; i++ {
-		err := db.Put(utils.GetTestKey(i), utils.RandomValue(i))
-		assert.Nil(b, err)
-	}
-
 	rand.Seed(uint64(time.Now().UnixNano()))
 	b.ResetTimer()
 	b.ReportAllocs()
