@@ -144,3 +144,100 @@ func TestRedisDataStructure_HDel(t *testing.T) {
 	assert.Equal(t, tiny_kvDB.ErrKeyNotFound, err)
 	assert.Nil(t, value)
 }
+
+func TestRedisDataStructure_SAdd(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+	ok, err := rds.SAdd(utils.GetTestKey(1), v1)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+	ok, err = rds.SAdd(utils.GetTestKey(1), v2)
+	assert.False(t, ok)
+	assert.Nil(t, err)
+	ok, err = rds.SAdd(utils.GetTestKey(1), v3)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+}
+
+func TestRedisDataStructure_SIsMember(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+
+	ok, err := rds.SAdd(utils.GetTestKey(1), v1)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SAdd(utils.GetTestKey(1), v2)
+	assert.False(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SAdd(utils.GetTestKey(1), v3)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SIsMember(utils.GetTestKey(2), v1)
+	assert.False(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SIsMember(utils.GetTestKey(1), v1)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SIsMember(utils.GetTestKey(1), v2)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SIsMember(utils.GetTestKey(1), []byte("zxc666"))
+	assert.False(t, ok)
+	assert.Nil(t, err)
+}
+
+func TestRedisDataStructure_SRem(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+
+	ok, err := rds.SAdd(utils.GetTestKey(1), v1)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SAdd(utils.GetTestKey(1), v2)
+	assert.False(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SAdd(utils.GetTestKey(1), v3)
+	assert.True(t, ok)
+	assert.Nil(t, err)
+
+	ok, err = rds.SRem(utils.GetTestKey(2), v1)
+	assert.Nil(t, err)
+	assert.False(t, ok)
+
+	ok, err = rds.SRem(utils.GetTestKey(1), v1)
+	assert.Nil(t, err)
+	assert.True(t, ok)
+
+	ok, err = rds.SRem(utils.GetTestKey(1), []byte("zxc666"))
+	assert.Nil(t, err)
+	assert.False(t, ok)
+}

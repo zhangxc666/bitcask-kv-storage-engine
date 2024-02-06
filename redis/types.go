@@ -87,6 +87,12 @@ func (rds *RedisDataStructure) Get(key []byte) ([]byte, error) {
 	return encValue[index:], nil
 }
 
+/*
+	Hash 数据结构
+	meta
+	<key+version+field,value>
+*/
+
 // HSet Hash 分成两部分，<key,meta>,<key+meta.version+field,value>
 func (rds *RedisDataStructure) HSet(key, field, value []byte) (bool, error) {
 	meta, err := rds.findMetaData(key, Hash)
@@ -174,6 +180,92 @@ func (rds *RedisDataStructure) HDel(key []byte, field []byte) (bool, error) {
 		}
 	}
 	return exist, nil
+}
+
+/*
+	SET数据结构
+*/
+
+func (rds *RedisDataStructure) SAdd(key, member []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, Set)
+	if err != nil {
+		return false, err
+	}
+	// 构造数据部分的key
+	// key+version+member+member_size
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+	// 如果不存在，就新增，存在就不用管了
+	var ok bool
+	if _, err := rds.db.Get(sk.encode()); errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+		meta.size++
+		_ = wb.Put(key, meta.encode())
+		_ = wb.Put(sk.encode(), nil)
+		if err := wb.Commit(); err != nil {
+			return false, err
+		}
+		ok = true
+	}
+	return ok, nil
+}
+
+func (rds *RedisDataStructure) SIsMember(key, member []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, Set)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+	if _, err := rds.db.Get(sk.encode()); err != nil {
+		if errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (rds *RedisDataStructure) SRem(key, member []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, Set)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+
+	// 报错
+	if _, err := rds.db.Get(sk.encode()); err != nil {
+		if errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// 存在更新
+	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+	meta.size--
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Put(sk.encode(), nil)
+	if err := wb.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // 找到元数据
