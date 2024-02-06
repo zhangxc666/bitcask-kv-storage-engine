@@ -261,7 +261,7 @@ func (rds *RedisDataStructure) SRem(key, member []byte) (bool, error) {
 	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
 	meta.size--
 	_ = wb.Put(key, meta.encode())
-	_ = wb.Put(sk.encode(), nil)
+	_ = wb.Delete(sk.encode())
 	if err := wb.Commit(); err != nil {
 		return false, err
 	}
