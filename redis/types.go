@@ -268,6 +268,101 @@ func (rds *RedisDataStructure) SRem(key, member []byte) (bool, error) {
 	return true, nil
 }
 
+// List 数据结构
+func (rds *RedisDataStructure) LPush(key []byte, element []byte) (uint32, error) {
+	return rds.pushInner(key, element, true)
+}
+
+func (rds *RedisDataStructure) RPush(key []byte, element []byte) (uint32, error) {
+	return rds.pushInner(key, element, false)
+}
+
+func (rds *RedisDataStructure) LPop(key []byte) ([]byte, error) {
+	return rds.popInner(key, true)
+}
+
+func (rds *RedisDataStructure) RPop(key []byte) ([]byte, error) {
+	return rds.popInner(key, false)
+}
+
+// 返回当前一共有多少数据
+func (rds *RedisDataStructure) pushInner(key, element []byte, isLeft bool) (uint32, error) {
+	// isLeft == true 表示左边push，反之是右边push
+	meta, err := rds.findMetaData(key, List)
+	if err != nil {
+		return 0, nil
+	}
+
+	// 构造数据部分的key
+	lk := listInternalKey{
+		key:     key,
+		version: meta.version,
+	}
+
+	// 如果是左边插入，index根据head修改
+	// 当head == tail时，表示此时链表为空
+	if isLeft {
+		lk.index = meta.head - 1
+	} else {
+		lk.index = meta.tail
+	}
+
+	// 更新元数据和数据部分
+	// 原子提交
+	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+	meta.size++
+	if isLeft {
+		meta.head--
+	} else {
+		meta.tail++
+	}
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Put(lk.encode(), element)
+	if err := wb.Commit(); err != nil {
+		return 0, err
+	}
+	return meta.size, nil
+}
+
+func (rds *RedisDataStructure) popInner(key []byte, isLeft bool) ([]byte, error) {
+	meta, err := rds.findMetaData(key, List)
+	if err != nil {
+		return nil, err
+	}
+	if meta.size == 0 {
+		return nil, nil
+	}
+
+	lk := listInternalKey{
+		key:     key,
+		version: meta.version,
+	}
+	if isLeft {
+		lk.index = meta.head
+	} else {
+		lk.index = meta.tail - 1
+	}
+	element, err := rds.db.Get(lk.encode())
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新元数据
+	meta.size--
+	if isLeft {
+		meta.head++
+	} else {
+		meta.tail--
+	}
+	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Delete(lk.encode())
+	if err := wb.Commit(); err != nil {
+		return nil, err
+	}
+	return element, nil
+}
+
 // 找到元数据
 func (rds *RedisDataStructure) findMetaData(key []byte, dataType redisDataType) (*metadata, error) {
 	metaBuf, err := rds.db.Get(key)

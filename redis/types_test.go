@@ -241,3 +241,75 @@ func TestRedisDataStructure_SRem(t *testing.T) {
 	assert.Nil(t, err)
 	assert.False(t, ok)
 }
+
+func TestList_LeftOp(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis-list")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+	key := utils.GetTestKey(1)
+	res, err := rds.LPush(key, v1)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(1), res)
+
+	res, err = rds.LPush(key, v2)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(2), res)
+
+	res, err = rds.LPush(key, v3)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(3), res)
+
+	val, err := rds.LPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v3, val)
+
+	val, err = rds.LPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v2, val)
+
+	val, err = rds.LPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v1, val)
+}
+
+func TestList_RightOp(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis-list")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+	key := utils.GetTestKey(1)
+	res, err := rds.RPush(key, v1)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(1), res)
+
+	res, err = rds.RPush(key, v2)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(2), res)
+
+	res, err = rds.RPush(key, v3)
+	assert.Nil(t, err)
+	assert.Equal(t, uint32(3), res)
+
+	val, err := rds.RPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v3, val)
+
+	val, err = rds.RPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v2, val)
+
+	val, err = rds.RPop(key)
+	assert.Nil(t, err)
+	assert.Equal(t, v1, val)
+}
