@@ -36,6 +36,10 @@ func NewRedisDataStructure(option tiny_kvDB.Options) (*RedisDataStructure, error
 	return &RedisDataStructure{db: db}, nil
 }
 
+func (rds *RedisDataStructure) Close() error {
+	return rds.db.Close()
+}
+
 /*
 string
 value: type(1B)+expire(8B)+value(N B)
