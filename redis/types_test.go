@@ -313,3 +313,35 @@ func TestList_RightOp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, v1, val)
 }
+
+func TestSortedSet(t *testing.T) {
+	opts := tiny_kvDB.DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-redis-get")
+	opts.DirPath = dir
+	rds, err := NewRedisDataStructure(opts)
+	assert.Nil(t, err)
+
+	v1, v2, v3 := []byte("v1"), []byte("v1"), []byte("v2")
+	key := utils.GetTestKey(1)
+
+	ok, err := rds.ZAdd(key, 100, v1)
+	assert.Nil(t, err)
+	assert.True(t, ok)
+
+	ok, err = rds.ZAdd(key, 200, v2)
+	assert.Nil(t, err)
+	assert.False(t, ok)
+
+	ok, err = rds.ZAdd(key, 300, v3)
+	assert.Nil(t, err)
+	assert.True(t, ok)
+
+	s1, err := rds.ZScore(key, v2)
+	assert.Nil(t, err)
+	assert.Equal(t, float64(200), s1)
+
+	s2, err := rds.ZScore(key, v3)
+	assert.Nil(t, err)
+	assert.Equal(t, float64(300), s2)
+
+}

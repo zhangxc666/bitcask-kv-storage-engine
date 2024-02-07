@@ -3,6 +3,7 @@ package redis
 import (
 	"encoding/binary"
 	"math"
+	"tiny-kvDB/utils"
 )
 
 const (
@@ -135,5 +136,58 @@ func (lk *listInternalKey) encode() []byte {
 	// index
 	binary.LittleEndian.PutUint64(buf[index:], lk.index)
 
+	return buf
+}
+
+type zSetInternalKey struct {
+	key     []byte
+	version int64
+	member  []byte
+	score   float64
+}
+
+func (zk *zSetInternalKey) encodeWithMember() []byte {
+	// key+version+member
+	buf := make([]byte, len(zk.key)+8+len(zk.member))
+
+	// key
+	index := 0
+	copy(buf[index:index+len(zk.key)], zk.key)
+	index += len(zk.key)
+
+	// version
+	binary.LittleEndian.PutUint64(buf[index:index+8], uint64(zk.version))
+	index += 8
+
+	// member
+	copy(buf[index:index+len(zk.member)], zk.member)
+	return buf
+}
+
+func (zk *zSetInternalKey) encodeWithScore() []byte {
+	scoreBuf := utils.Float64ToBytes(zk.score)
+	// key+version+score+member+member_size
+	// 用于根据score的分数范围，查找对应的member
+	buf := make([]byte, len(zk.key)+8+len(scoreBuf)+len(zk.member)+4)
+
+	// key
+	index := 0
+	copy(buf[index:index+len(zk.key)], zk.key)
+	index += len(zk.key)
+
+	// version
+	binary.LittleEndian.PutUint64(buf[index:index+8], uint64(zk.version))
+	index += 8
+
+	// score
+	copy(buf[index:index+len(scoreBuf)], scoreBuf)
+	index += len(scoreBuf)
+
+	// member
+	copy(buf[index:index+len(zk.member)], zk.member)
+	index += len(zk.member)
+
+	// member_size
+	binary.LittleEndian.PutUint32(buf[index:], uint32(len(zk.member)))
 	return buf
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 	tiny_kvDB "tiny-kvDB"
+	"tiny-kvDB/utils"
 )
 
 var (
@@ -361,6 +362,84 @@ func (rds *RedisDataStructure) popInner(key []byte, isLeft bool) ([]byte, error)
 		return nil, err
 	}
 	return element, nil
+}
+
+/*
+Sorted Set
+*/
+
+func (rds *RedisDataStructure) ZAdd(key []byte, score float64, member []byte) (bool, error) {
+	meta, err := rds.findMetaData(key, ZSet)
+	if err != nil {
+		return false, err
+	}
+	zk := &zSetInternalKey{
+		key:     key,
+		version: meta.version,
+		score:   score,
+		member:  member,
+	}
+
+	exist := true
+	v, err := rds.db.Get(zk.encodeWithMember())
+	if err != nil && !errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		return false, err
+	}
+	if errors.Is(err, tiny_kvDB.ErrKeyNotFound) {
+		exist = false
+	}
+
+	if exist {
+		// 如果已经存在，且score相等，则不做任何修改
+		if score == utils.FloatFromBytes(v) {
+			return false, nil
+		}
+	}
+
+	// 更新元数据和数据部分
+	wb := rds.db.NewWriteBatch(tiny_kvDB.DefaultWriteBatchOptions)
+	if !exist {
+		meta.size++
+		_ = wb.Put(key, meta.encode())
+	}
+	// 如果存在需要获取sk_withScore
+	// 因为对应with member来说，直接更新<key+version+member,score>即可修改对应的分数
+	// 而对于with score，需要删除原来得分的member，再插入新的得分的member
+	if exist {
+		oldKey := &zSetInternalKey{
+			key:     key,
+			version: meta.version,
+			member:  member,
+			score:   utils.FloatFromBytes(v),
+		}
+		_ = wb.Delete(oldKey.encodeWithScore())
+	}
+	_ = wb.Put(zk.encodeWithMember(), utils.Float64ToBytes(score))
+	_ = wb.Put(zk.encodeWithScore(), nil)
+	if err := wb.Commit(); err != nil {
+		return false, err
+	}
+	return !exist, nil
+}
+
+func (rds *RedisDataStructure) ZScore(key []byte, member []byte) (float64, error) {
+	meta, err := rds.findMetaData(key, ZSet)
+	if err != nil {
+		return -1, err
+	}
+	if meta.size == 0 {
+		return -1, err
+	}
+	zk := &zSetInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+	value, err := rds.db.Get(zk.encodeWithMember())
+	if err != nil {
+		return -1, err
+	}
+	return utils.FloatFromBytes(value), nil
 }
 
 // 找到元数据
