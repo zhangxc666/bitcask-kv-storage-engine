@@ -13,12 +13,13 @@ import (
 type cmdHandler func(client *BitcaskClient, args [][]byte) (any, error)
 
 var supportedCommand = map[string]cmdHandler{
-	"set":   set,
-	"get":   get,
-	"sadd":  sadd,
-	"hset":  hset,
-	"lpush": lpush,
-	"zadd":  zadd,
+	"set":    set,
+	"get":    get,
+	"sadd":   sadd,
+	"hset":   hset,
+	"lpush":  lpush,
+	"zadd":   zadd,
+	"config": config,
 }
 
 type BitcaskClient struct {
@@ -130,7 +131,7 @@ func lpush(client *BitcaskClient, args [][]byte) (any, error) {
 
 func zadd(client *BitcaskClient, args [][]byte) (any, error) {
 	if len(args) != 3 {
-		return nil, newWrongNumberOfArgsError("sadd")
+		return nil, newWrongNumberOfArgsError("zadd")
 	}
 	var ok = 0
 	key, score, member := args[0], args[1], args[2]
@@ -142,4 +143,9 @@ func zadd(client *BitcaskClient, args [][]byte) (any, error) {
 		ok = 1
 	}
 	return redcon.SimpleInt(ok), nil
+}
+
+func config(client *BitcaskClient, args [][]byte) (any, error) {
+	// 返回一个空数组响应
+	return redcon.Array, nil
 }

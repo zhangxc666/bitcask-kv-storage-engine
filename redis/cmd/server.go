@@ -56,4 +56,5 @@ func (svr *BitcaskServer) close(conn redcon.Conn, err error) {
 		_ = db.Close()
 	}
 	_ = svr.server.Close()
+	_ = conn.Close()
 }
